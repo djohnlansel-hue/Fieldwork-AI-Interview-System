@@ -5,6 +5,23 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Ma
 const today = () => new Date().toISOString().slice(0,10);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const base = {surveys:[], respondents:[], sessions:[], questions:[], responses:[], activity:[]};
+function ensureMinimumDemoRespondents(){
+ const hasDemoData=state.surveys.some(s=>String(s.title||"").includes("(Demo)")||s.id==="demo-survey-student-system")||state.respondents.some(r=>String(r.name||"").includes("(Demo)")||String(r.name||"").startsWith("Demo Respondent "));
+ if(!hasDemoData||state.respondents.length>=50)return false;
+ const existingIds=new Set(state.respondents.map(r=>r.id));
+ let index=1;
+ while(state.respondents.length<50){
+  const number=String(index+2).padStart(2,"0"),id="demo-respondent-"+number;
+  index++;
+  if(existingIds.has(id))continue;
+  const roles=["Student","Faculty Member","Administrative Staff","IT Support"];
+  const departments=["Students","Academic Affairs","Administration","Information Technology"];
+  const i=Number(number)-3;
+  state.respondents.push({id,name:"Demo Respondent "+number,role:roles[i%roles.length],department:departments[i%departments.length],language:"English"});
+  existingIds.add(id);
+ }
+ return true;
+}
 function createDemoData(){
  const surveyId="demo-survey-student-system", q1="demo-question-navigation", q2="demo-question-improvements";
  const r1="demo-respondent-student", r2="demo-respondent-staff";
@@ -14,7 +31,8 @@ function createDemoData(){
   surveys:[{id:surveyId,title:"Student Information System Feedback",system:"Student Information System",description:"Demo interview guide for gathering feedback about the student information system.",type:"Semi-Structured",language:"English",status:"active",role:"user",createdAt:now.toISOString()}],
   respondents:[
    {id:r1,name:"Alex Morgan (Demo)",role:"Student",department:"Students",language:"English"},
-   {id:r2,name:"Taylor Reed (Demo)",role:"Administrative Staff",department:"Administration",language:"English"}
+   {id:r2,name:"Taylor Reed (Demo)",role:"Administrative Staff",department:"Administration",language:"English"},
+   ...Array.from({length:48},(_,i)=>({id:"demo-respondent-"+String(i+3).padStart(2,"0"),name:"Demo Respondent "+String(i+3).padStart(2,"0"),role:["Student","Faculty Member","Administrative Staff","IT Support"][i%4],department:["Students","Academic Affairs","Administration","Information Technology"][i%4],language:"English"}))
   ],
   sessions:[
    {id:s1,title:"Student Portal Usability Interview (Demo)",surveyId,surveyTitle:"Student Information System Feedback",system:"Student Information System",mode:"Individual",respondentId:r1,respondentName:"Alex Morgan (Demo)",participants:[],language:"English",method:"Text",date:dayOffset(1),status:"completed",createdAt:new Date(now.getTime()-86400000).toISOString()},
@@ -69,10 +87,12 @@ async function load(){
     if(!server||server.version!==2||!server.data||typeof server.data!=="object") throw Error("The server returned an invalid saved-data format.");
     state={...base,...server.data};
     const seededDemoData=state.sessions.length===0&&state.surveys.length===0&&state.respondents.length===0;
-    if(seededDemoData){state=createDemoData();localStorage.setItem(STORE_KEY,JSON.stringify(state));hasPendingLocalChanges=true;}
+    if(seededDemoData) state=createDemoData();
+    const addedDemoRespondents=ensureMinimumDemoRespondents();
+    if(seededDemoData||addedDemoRespondents){localStorage.setItem(STORE_KEY,JSON.stringify(state));hasPendingLocalChanges=true;}
     else localStorage.setItem(STORE_KEY,JSON.stringify(state));
     render();syncBadge();
-    if(seededDemoData) await sync();
+    if(seededDemoData||addedDemoRespondents) await sync();
   } catch(err) { showConnectionError(err.message||undefined); }
 }
 async function sync(){
