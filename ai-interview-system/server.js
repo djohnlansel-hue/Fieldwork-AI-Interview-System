@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const crypto = require("crypto");
 const fs = require("fs/promises");
 const { createClient } = require("@supabase/supabase-js");
 
@@ -57,6 +58,75 @@ async function readSupabaseState() {
   return { version: data.version, data: data.data };
 }
 
+
+
+const APP_USERNAME = process.env.APP_USERNAME || "";
+const APP_PASSWORD = process.env.APP_PASSWORD || "";
+const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET || "";
+const authConfigured = Boolean(APP_USERNAME && APP_PASSWORD);
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const loginAttempts = new Map();
+
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+function signSession(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", APP_SESSION_SECRET).update(encoded).digest("base64url");
+  return encoded + "." + signature;
+}
+function readSession(req) {
+  if (!authConfigured) return { authenticated: true, username: "configured-by-deployment" };
+  const cookies = String(req.headers.cookie || "").split(";").map(x => x.trim());
+  const token = cookies.find(x => x.startsWith("fieldwork_session="))?.slice("fieldwork_session=".length);
+  if (!token) return null;
+  const [encoded, signature] = token.split(".");
+  if (!encoded || !signature) return null;
+  const expected = crypto.createHmac("sha256", APP_SESSION_SECRET).update(encoded).digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (payload.exp < Date.now() || payload.u !== APP_USERNAME) return null;
+    return { authenticated: true, username: payload.u };
+  } catch { return null; }
+}
+
+app.get("/api/session", (req, res) => {
+  const session = readSession(req);
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ authRequired: authConfigured, authenticated: Boolean(session), username: session?.username || null });
+});
+
+app.post("/api/login", (req, res) => {
+  if (!authConfigured || APP_SESSION_SECRET.length < 32) return res.status(503).json({ error: "Login is not configured securely. Set APP_USERNAME, APP_PASSWORD, and a 32-character APP_SESSION_SECRET in Render." });
+  const now = Date.now();
+  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const recent = (loginAttempts.get(key) || []).filter(time => now - time < 60_000);
+  if (recent.length >= 10) return res.status(429).json({ error: "Too many login attempts. Please wait a minute and try again." });
+  recent.push(now); loginAttempts.set(key, recent);
+  const username = String(req.body?.username || "");
+  const password = String(req.body?.password || "");
+  if (!safeEqual(username, APP_USERNAME) || !safeEqual(password, APP_PASSWORD)) {
+    return res.status(401).json({ error: "Incorrect username or password." });
+  }
+  const token = signSession({ u: APP_USERNAME, exp: Date.now() + SESSION_TTL_MS });
+  res.setHeader("Set-Cookie", "fieldwork_session=" + token + "; HttpOnly; Path=/; SameSite=Strict; Max-Age=" + Math.floor(SESSION_TTL_MS / 1000) + (process.env.NODE_ENV === "production" ? "; Secure" : ""));
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ ok: true });
+});
+
+app.post("/api/logout", (_req, res) => {
+  res.setHeader("Set-Cookie", "fieldwork_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0" + (process.env.NODE_ENV === "production" ? "; Secure" : ""));
+  return res.json({ ok: true });
+});
+
+app.use("/api", (req, res, next) => {
+  if (!authConfigured || req.path === "/session" || req.path === "/login" || req.path === "/logout") return next();
+  if (!readSession(req)) return res.status(401).json({ error: "Please log in to access Fieldwork." });
+  next();
+});
 
 const generationAttempts = new Map();
 app.post("/api/generate-questions", async (req, res) => {
@@ -142,7 +212,8 @@ app.get("/healthz", async (_req, res) => {
     return res.status(200).json({
       ok: true,
       storage: "json-file",
-      supabaseConfigured: false
+      supabaseConfigured: false,
+      authConfigured
     });
   }
 
@@ -154,7 +225,7 @@ app.get("/healthz", async (_req, res) => {
       .maybeSingle();
 
     if (error) throw error;
-    return res.json({ ok: true, storage: "supabase" });
+    return res.json({ ok: true, storage: "supabase", authConfigured });
   } catch (error) {
     console.error("Supabase health check failed:", error.message);
     return res.status(503).json({
