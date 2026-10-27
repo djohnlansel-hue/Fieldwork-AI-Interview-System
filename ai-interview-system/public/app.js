@@ -1,198 +1,74 @@
-// ---------- DEMO STATE ----------
-const state = {
-  interviews: [
-    { id: 1, name: "jj", project: "individual", date: "10/10/2026", type: "individual", status: "scheduled" },
-    { id: 2, name: "LANSEEL", project: "individual", date: "05/10/2026", type: "individual", status: "in-progress" },
-    { id: 3, name: "inventory", project: "individual", date: "05/10/2026", type: "individual", status: "completed" }
-  ],
-  respondents: [
-    { name: "lans", project: "inventory", answers: 10 },
-    { name: "LANSEEL", project: "individual", answers: 3 },
-    { name: "jj", project: "individual", answers: 3 }
-  ],
-  questions: [
-    "What specific tasks do you perform most frequently in the Customer Service Improvement?",
-    "What are the most frustrating or difficult parts of using the Customer Service Improvement?",
-    "If you could change one thing about the Customer Service Improvement, what would it be?",
-    "Have you encountered any errors or unexpected behavior while using the Customer Service Improvement?",
-    "Are there any tasks you cannot complete using the Customer Service Improvement tool?",
-    "What features or capabilities are missing from the Customer Service Improvement?",
-    "What would make the Customer Service Improvement easier and more efficient for you?"
-  ],
-  responses: [
-    { user: "lans", project: "inventory", type: "voice", date: "05/10/2026", q: "What would make the Customer Service Improvement easier and more efficient for s...", a: "voice recording submitted" },
-    { user: "lans", project: "inventory", type: "video", date: "05/10/2026", q: "What features or capabilities are missing from the Customer Service Improvement ...", a: "video response submitted" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "What would make the Customer Service Improvement easier and more efficient for s...", a: "JQJOOJSOJOS" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "If you could change one thing about the Customer Service Improvement, what would...", a: "NJSJJSJO" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "Are there any tasks you cannot complete using the Customer Service Improvement t...", a: "n.ksnkS" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "Have you encountered any errors or unexpected behavior while using the Customer ...", a: "nknklml," },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "If you could change one thing about the Customer Service Improvement, what would...", a: "mmlmlm l" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "What are the most frustrating or difficult parts of using the Customer Service I...", a: "nknkl," },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "Are there any tasks you cannot complete using the Customer Service Improvement t...", a: "jbjbjnknh" },
-    { user: "lans", project: "inventory", type: "text", date: "05/10/2026", q: "What specific tasks do you perform most frequently in the Customer Service Impro...", a: "bjbjnjnk" }
-  ],
-  activity: [
-    { date: "10/10/2026", text: 'Interview Created — Session "jj" created' },
-    { date: "10/10/2026", text: 'Interview Updated — Session "LANSEEL" marked as in-progress' },
-    { date: "05/10/2026", text: 'Interview Created — Session "LANSEEL" created' },
-    { date: "05/10/2026", text: 'Interview Deleted — Session "survey" deleted' },
-    { date: "05/10/2026", text: 'Interview Completed — Session "survey" marked as completed' },
-    { date: "05/10/2026", text: 'Interview Created — Session "survey" created' },
-    { date: "05/10/2026", text: 'Interview Completed — Session "inventory" completed with 1 respondent(s)' }
-  ]
-};
-
-// ---------- HELPERS ----------
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => document.querySelectorAll(sel);
-const statusClass = (s) => s === "completed" ? "completed" : s === "in-progress" ? "in-progress" : "scheduled";
-
-// ---------- RENDER ----------
-function renderStats() {
-  const total = state.interviews.length;
-  const completed = state.interviews.filter(i => i.status === "completed").length;
-  $("#stat-total").textContent = total;
-  $("#stat-completed").textContent = completed;
-  $("#stat-pending").textContent = total - completed;
-  $("#stat-respondents").textContent = state.respondents.length;
-  $("#stat-questions").textContent = state.questions.length;
-  $("#stat-responses").textContent = state.responses.length;
-
-  const pct = total ? Math.round((completed / total) * 100) : 0;
-  $("#completion-pct").textContent = pct + "%";
-  $("#completion-fill").style.width = pct + "%";
-  $("#completion-sub").textContent = `${completed} of ${total} interviews`;
+const STORE_KEY = "fieldwork-v2";
+const $ = (s, root=document) => root.querySelector(s);
+const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random());
+const today = () => new Date().toISOString().slice(0,10);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const base = {surveys:[], respondents:[], sessions:[], questions:[], responses:[], activity:[]};
+let state = {...base}, page = "dashboard", activeSession = null, filters = {survey:"all",from:"",to:""};
+let online = navigator.onLine, recording = null, recorder = null, chunks = [];
+function log(action, detail){ state.activity.unshift({id:uid(),action,detail,date:new Date().toISOString()}); state.activity=state.activity.slice(0,100); }
+function persist(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); render(); syncBadge(); }
+async function load(){
+  try { const r=await fetch("/api/state"); if(r.ok){const server=await r.json(); if(server && server.version===2) state={...base,...server.data}; else state={...base,...server};} else throw Error("API unavailable"); }
+  catch { try{state={...base,...JSON.parse(localStorage.getItem(STORE_KEY)||"{}")};}catch{state={...base};} }
+  state={...base,...state}; render(); syncBadge();
 }
-
-function renderResponses(container, limit) {
-  const items = limit ? state.responses.slice(0, limit) : state.responses;
-  container.innerHTML = items.map(r => `
-    <div class="resp">
-      <div class="head">
-        <div class="avatar">${r.user[0].toUpperCase()}</div>
-        <strong>${r.user}</strong>
-        <span class="badge">${r.project}</span>
-        <span class="tag ${r.type}">${r.type}</span>
-        <span class="meta">${r.date}</span>
-      </div>
-      <div class="q">Q: ${r.q}</div>
-      <div class="a">${r.a}</div>
-    </div>
-  `).join("");
+async function sync(){
+  if(!navigator.onLine)return syncBadge();
+  try{ const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({version:2,data:state})}); if(!r.ok)throw Error(); localStorage.setItem(STORE_KEY,JSON.stringify(state)); $("#sync-status").textContent="All changes saved"; }
+  catch { localStorage.setItem(STORE_KEY,JSON.stringify(state)); $("#sync-status").textContent="Saved locally · waiting to sync"; }
 }
-
-function renderInterviews() {
-  $("#recent-interviews").innerHTML = state.interviews.map(i => `
-    <div class="item">
-      <div><strong>${i.name}</strong><div class="meta">${i.project} · ${i.status}</div></div>
-      <div class="meta">${i.date}</div>
-    </div>
-  `).join("");
-  $("#interviews-table").innerHTML = state.interviews.map(i => `
-    <tr>
-      <td>${i.name}</td><td>${i.project}</td><td>${i.date}</td><td>${i.type}</td>
-      <td><span class="status ${statusClass(i.status)}">${i.status}</span></td>
-    </tr>
-  `).join("");
-}
-
-function renderRespondents() {
-  $("#respondents-table").innerHTML = state.respondents.map(r => `
-    <tr><td>${r.name}</td><td>${r.project}</td><td>${r.answers}</td></tr>
-  `).join("");
-}
-
-function renderQuestions() {
-  $("#questions-list").innerHTML = state.questions.map((q, i) => `
-    <li class="item">
-      <div class="q">Q${i + 1}. ${q}</div>
-      <div class="meta">text · audio · video supported</div>
-    </li>
-  `).join("");
-}
-
-function renderActivity() {
-  $("#recent-activity").innerHTML = state.activity.slice(0, 7).map(a => `
-    <div class="item">
-      <div>${a.text}</div>
-      <div class="meta">${a.date}</div>
-    </div>
-  `).join("");
-}
-
-function renderTrendChart() {
-  const canvas = document.getElementById("trendChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width = canvas.offsetWidth;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
-
-  const data = [1, 2, 1, 3, 2, 1, 2];
-  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const max = Math.max(...data);
-  const pad = 24;
-  const chartW = w - pad * 2;
-  const chartH = h - pad * 2;
-
-  ctx.strokeStyle = "#262a44";
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad + (chartH / 4) * i;
-    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke();
-  }
-
-  const barW = (chartW / data.length) * 0.5;
-  data.forEach((v, i) => {
-    const x = pad + (chartW / data.length) * i + (chartW / data.length - barW) / 2;
-    const barH = (v / max) * chartH;
-    const y = pad + chartH - barH;
-    const grad = ctx.createLinearGradient(0, y, 0, y + barH);
-    grad.addColorStop(0, "#6c5ce7");
-    grad.addColorStop(1, "#00cec9");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, barW, barH, 4);
-    else ctx.rect(x, y, barW, barH);
-    ctx.fill();
-    ctx.fillStyle = "#8a8fa3";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(labels[i], x + barW / 2, h - 6);
-  });
-}
-
-// ---------- NAVIGATION ----------
-function setupNav() {
-  $$(".nav-item").forEach(link => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      $$(".nav-item").forEach(l => l.classList.remove("active"));
-      link.classList.add("active");
-      const page = link.dataset.page;
-      $$(".page").forEach(p => p.classList.remove("active"));
-      const target = document.getElementById("page-" + page);
-      if (target) target.classList.add("active");
-      $("#page-title").textContent = link.textContent.trim().replace(/^[^\w]+/, "");
-    });
-  });
-}
-
-// ---------- INIT ----------
-function init() {
-  const today = new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  $("#today").textContent = today;
-
-  renderStats();
-  renderResponses($("#recent-responses"), 6);
-  renderResponses($("#all-responses"));
-  renderInterviews();
-  renderRespondents();
-  renderQuestions();
-  renderActivity();
-  renderTrendChart();
-  setupNav();
-  window.addEventListener("resize", renderTrendChart);
-}
-
-document.addEventListener("DOMContentLoaded", init);
+function syncBadge(){ const el=$("#sync-status"); if(el)el.textContent=navigator.onLine?"Connected · local backup enabled":"Offline · changes saved locally"; }
+function save(){ localStorage.setItem(STORE_KEY,JSON.stringify(state)); render(); sync(); }
+function sentiment(t){const s=(t||"").toLowerCase();const pos=["easy","good","great","helpful","fast","excellent","satisfied","useful","love","improve","better","convenient","madali","maganda","maayos","okay","mabuti"];const neg=["slow","error","problem","difficult","hard","confusing","broken","missing","bad","frustrated","delay","crash","mahirap","mabagal","problema","kulang","nakakalito"];let p=pos.filter(w=>s.includes(w)).length,n=neg.filter(w=>s.includes(w)).length;return n>p?"Negative":p>n?"Positive":"Neutral";}
+function keywords(){const stop=new Set("the and for with that this have from are was were you your our their about what when where how can could would should does did into using user system very they them there then than also just".split(" "));const counts={};state.responses.forEach(r=>(r.answer||"").toLowerCase().match(/[a-zA-ZÀ-ÿ]{4,}/g)?.forEach(w=>{if(!stop.has(w))counts[w]=(counts[w]||0)+1;}));return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,12);}
+function genQuestions(system,role,type,lang,count){const subject=system||"information system", person=role||"user";const q=[
+  ["Workflow",`Can you describe your usual workflow when using ${subject} as a ${person}?`],
+  ["Pain Points",`Which parts of ${subject} are most difficult or time-consuming for you?`],
+  ["System Limitations",`What errors, limitations, or missing information have you encountered in ${subject}?`],
+  ["User Expectations",`What do you expect ${subject} to help you accomplish?`],
+  ["Desired Features",`What feature would improve your experience with ${subject} the most, and why?`],
+  ["Workflow",`Which tasks do you still complete manually outside ${subject}?`],
+  ["Pain Points",`How do current problems with ${subject} affect your work?`],
+  ["User Expectations",`How easy is it to learn and navigate ${subject}?`],
+  ["System Limitations",`What information or reports are difficult to find in ${subject}?`],
+  ["Desired Features",`If you could change one thing about ${subject}, what would you change?`],
+  ["General",`What training or support would help you use ${subject} more effectively?`],
+  ["General",`Is there anything else about ${subject} that the development team should know?`]
+].slice(0,Math.max(3,Math.min(50,Number(count)||8)));
+if(lang==="Tagalog")return q.map(([category,text])=>({id:uid(),category,text:text.replace("Can you describe your usual workflow","Maaari mo bang ilarawan ang karaniwan mong proseso").replace("Which parts of","Aling bahagi ng").replace(" are most difficult or time-consuming for you?"," ang pinakamahirap o matagal gawin para sa iyo?").replace("What errors, limitations, or missing information have you encountered in","Anong mga error, limitasyon, o kulang na impormasyon ang naranasan mo sa").replace("What do you expect","Ano ang inaasahan mong").replace(" to help you accomplish?"," na maitulong sa iyo?").replace("What feature would improve your experience with","Anong feature ang makapagpapaganda ng paggamit mo sa").replace(" the most, and why?"," at bakit?"),type:"open",difficulty:"Medium",relevance:4,tags:[category.toLowerCase().replace(" ","-")]}));
+return q.map(([category,text])=>({id:uid(),category,text,type:"open",difficulty:"Medium",relevance:4,tags:[category.toLowerCase().replace(" ","-")]}));}
+function shell(content){return `<aside class="sidebar"><div class="brand"><span class="logo">◆</span><div><h1>Fieldwork</h1><small>AI-Assisted Interviews</small></div></div><nav>${[["dashboard","▦","Dashboard"],["surveys","▤","Surveys"],["interviews","◉","New Interview"],["respondents","♙","Respondents"],["questions","☷","Question Bank"],["responses","▣","Interview History"],["analytics","▥","Analytics & Reports"]].map(([id,ic,label])=>`<button class="nav-item ${page===id?"active":""}" data-page="${id}"><span>${ic}</span>${label}</button>`).join("")}</nav><div class="sidebar-bottom"><span class="dot"></span><span id="sync-status">Checking sync…</span></div></aside><main class="main"><header class="topbar"><div><p class="eyebrow">FIELDWORK WORKSPACE</p><h2>${({"dashboard":"Dashboard","surveys":"Surveys & Guides","interviews":"New Interview","respondents":"Respondents","questions":"Question Bank","responses":"Interview History","analytics":"Analytics & Reports"})[page]}</h2></div><div class="topbar-right"><span class="date">${new Date().toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}</span><button class="btn primary" data-action="new-survey">＋ New survey</button></div></header><div id="page-content">${content}</div></main><div id="modal-root"></div>`;}
+function stat(label,value,note){return `<article class="stat-card"><p>${label}</p><strong>${value}</strong><small>${note}</small></article>`;}
+function panel(title,body,extra=""){return `<section class="panel"><div class="panel-head"><h3>${title}</h3>${extra}</div>${body}</section>`;}
+function dashboard(){const done=state.sessions.filter(s=>s.status==="completed").length,total=state.sessions.length,pct=total?Math.round(done/total*100):0;return `<p class="subtitle">Plan interviews, capture responses, and turn feedback into useful findings.</p><div class="stats-grid">${stat("Total Records",total,"Interview sessions")}${stat("Completed Interviews",done,"Finished sessions")}${stat("Pending Interviews",total-done,"Scheduled or in progress")}${stat("Completion Rate",pct+"%","Across all sessions")}${stat("Respondents",state.respondents.length,"Registered participants")}${stat("Responses",state.responses.length,"Answers captured")}</div><div class="two-col">${panel("Interview completion",`<div class="progress-label">${pct}%</div><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><p class="muted small">${done} of ${total} sessions completed</p>`)}${panel("Response sentiment",`<div class="sentiment-grid">${["Positive","Neutral","Negative"].map(x=>`<div><b>${state.responses.filter(r=>sentiment(r.answer)===x).length}</b><span>${x}</span></div>`).join("")}</div>`)}</div><div class="two-col">${panel("Recent interviews",state.sessions.slice(0,5).map(s=>`<div class="list-row"><div><b>${esc(s.title)}</b><small>${esc(s.surveyTitle)} · ${esc(s.mode)} · ${esc(s.date)}</small></div><span class="status ${s.status}">${esc(s.status)}</span></div>`).join("")||empty("No interviews yet. Create a survey and start an interview."))}${panel("Recent responses",state.responses.slice(-5).reverse().map(r=>`<div class="list-row"><div><b>${esc(r.respondentName)}</b><small>${esc(r.questionText)}</small><p>${esc(r.answer||"No text transcript")}</p></div><span class="status">${sentiment(r.answer)}</span></div>`).join("")||empty("Submitted answers will appear here.")}</div>${panel("Quick actions",`<div class="action-row"><button class="btn primary" data-page="surveys">Create survey</button><button class="btn secondary" data-page="interviews">Start interview</button><button class="btn secondary" data-page="analytics">View analytics</button></div>`) }`;}
+function empty(msg){return `<p class="empty">${esc(msg)}</p>`;}
+function surveys(){return `<div class="section-intro"><div><p class="subtitle">Create a guide, generate questions, and reuse questions from your library.</p></div><button class="btn primary" data-action="new-survey">＋ Create survey</button></div><div class="survey-grid">${state.surveys.map(s=>`<article class="survey-card"><div class="card-top"><span class="status ${s.status}">${s.status}</span><span class="muted small">${s.type}</span></div><h3>${esc(s.title)}</h3><p>${esc(s.description||"No description added.")}</p><div class="card-meta">${state.questions.filter(q=>q.surveyId===s.id).length} questions · ${esc(s.language||"English")}</div><div class="action-row"><button class="btn primary small-btn" data-action="edit-survey" data-id="${s.id}">Manage questions</button><button class="btn secondary small-btn" data-action="start-survey" data-id="${s.id}">Start interview</button><button class="btn ghost small-btn" data-action="toggle-survey" data-id="${s.id}">${s.status==="active"?"Archive":"Activate"}</button></div></article>`).join("")||empty("No surveys created yet. Create your first interview guide.")}</div>`;}
+function respondents(){return `<div class="section-intro"><p class="subtitle">Keep track of interview participants and their roles.</p><button class="btn primary" data-action="new-respondent">＋ Add respondent</button></div>${panel("Respondent directory",state.respondents.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Name</th><th>Role</th><th>Department / Group</th><th>Language</th><th>Responses</th><th></th></tr></thead><tbody>${state.respondents.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.role)}</td><td>${esc(r.department||"—")}</td><td>${esc(r.language||"English")}</td><td>${state.responses.filter(a=>a.respondentId===r.id).length}</td><td><button class="btn ghost small-btn" data-action="delete-respondent" data-id="${r.id}">Delete</button></td></tr>`).join("")}</tbody></table></div>`:empty("Add respondents here or create them while starting an interview."))}`;}
+function questionBank(){return `<div class="section-intro"><p class="subtitle">Manage reusable questions. Each survey supports up to 50 questions.</p><button class="btn primary" data-action="new-bank-question">＋ Add question</button></div>${panel("Reusable question bank",`<div class="filter-row"><input id="q-search" placeholder="Search question text or tags…"><select id="q-category"><option value="all">All categories</option>${["Workflow","Pain Points","User Expectations","System Limitations","Desired Features","General"].map(x=>`<option>${x}</option>`).join("")}</select></div><div id="bank-results">${bankRows(state.questions.filter(q=>!q.surveyId))}</div>`)}`;}
+function bankRows(rows){return rows.length?rows.map(q=>`<div class="question-row"><div><b>${esc(q.text)}</b><div class="tag-row"><span class="tag">${esc(q.category||"General")}</span><span class="tag">${esc(q.difficulty||"Medium")}</span><span class="tag">Relevance ${q.relevance||3}/5</span>${(q.tags||[]).map(t=>`<span class="tag">#${esc(t)}</span>`).join("")}</div></div><button class="btn ghost small-btn" data-action="delete-question" data-id="${q.id}">Delete</button></div>`).join(""):empty("No matching questions. Add a question or save one from a survey.");}
+function interviews(){return `<p class="subtitle">Create an individual, group, or randomized interview session.</p>${panel("Set up an interview",`<form id="session-form" class="form-grid"><label>Interview title<input name="title" required placeholder="e.g. Inventory system feedback"></label><label>Survey guide<select name="surveyId" required><option value="">Choose a survey</option>${state.surveys.filter(s=>s.status!=="archived").map(s=>`<option value="${s.id}">${esc(s.title)}</option>`).join("")}</select></label><label>Interview mode<select name="mode"><option>Individual</option><option>Group</option><option>Random</option></select></label><label>Respondent<select name="respondentId"><option value="">Create / select respondent</option>${state.respondents.map(r=>`<option value="${r.id}">${esc(r.name)} — ${esc(r.role)}</option>`).join("")}</select></label><label>Respondent name (if new)<input name="newName" placeholder="Full name"></label><label>Respondent role<input name="newRole" placeholder="e.g. Staff, student, administrator"></label><label>Response language<select name="language"><option>English</option><option>Tagalog</option><option>Hiligaynon</option><option>Cebuano</option><option>Other</option></select></label><label>Answer method<select name="method"><option>Text</option><option>Voice</option><option>Video</option></select></label><div class="full-width"><button class="btn primary" type="submit">Create and open interview</button></div></form>`)}${panel("Sessions",state.sessions.map(s=>`<div class="list-row"><div><b>${esc(s.title)}</b><small>${esc(s.surveyTitle)} · ${esc(s.mode)} · ${esc(s.date)}</small></div><div class="action-row"><span class="status ${s.status}">${s.status}</span><button class="btn primary small-btn" data-action="open-session" data-id="${s.id}">${s.status==="completed"?"Review":"Continue"}</button></div></div>`).join("")||empty("Your interview sessions will appear here."))}`;}
+function sessionView(s){const qs=state.questions.filter(q=>q.surveyId===s.surveyId);const rs=state.responses.filter(r=>r.sessionId===s.id);return `<button class="btn ghost" data-page="interviews">← Back to sessions</button><div class="session-heading"><div><p class="eyebrow">${esc(s.mode)} INTERVIEW</p><h3>${esc(s.title)}</h3><p class="muted">${esc(s.surveyTitle)} · ${esc(s.respondentName)} · ${esc(s.language)}</p></div><span class="status ${s.status}">${s.status}</span></div>${s.status!=="completed"?qs.map((q,i)=>{const answer=rs.find(r=>r.questionId===q.id);return `<section class="question-answer"><div class="question-number">QUESTION ${i+1} OF ${qs.length}</div><h3>${esc(q.text)}</h3>${q.type==="likert"?`<div class="likert-row">${(q.labels||["Strongly disagree","Disagree","Neutral","Agree","Strongly agree"]).map((l,n)=>`<label class="likert-option"><input type="radio" name="likert-${q.id}" value="${n+1}" ${answer&&answer.likert===n+1?"checked":""}><span>${n+1}</span><small>${esc(l)}</small></label>`).join("")}</div>`:`<textarea data-answer="${q.id}" rows="4" placeholder="Type the respondent's answer here…">${esc(answer?.answer||"")}</textarea><div class="record-row"><span class="muted small">Answer method</span><select data-method="${q.id}"><option ${(answer?.method||s.method)==="Text"?"selected":""}>Text</option><option ${(answer?.method||s.method)==="Voice"?"selected":""}>Voice</option><option ${(answer?.method||s.method)==="Video"?"selected":""}>Video</option></select><button class="btn secondary small-btn" data-action="record" data-id="${q.id}" data-session="${s.id}">Record media</button>${answer?.mediaUrl?`<a href="${answer.mediaUrl}" target="_blank" rel="noopener">Open recording</a>`:""}</div>`}</section>`}).join(""):panel("Interview completed",`<p>All saved responses are available for review below.</p>`)}${s.status!=="completed"?`<div class="action-row end"><button class="btn secondary" data-action="save-session" data-id="${s.id}">Save answers</button><button class="btn primary" data-action="complete-session" data-id="${s.id}">Complete interview</button></div>`:""}${panel("Saved responses",rs.map(r=>`<div class="list-row"><div><b>${esc(r.questionText)}</b><p>${esc(r.answer||("Likert score: "+r.likert)||"Media response")}</p></div><span class="status">${sentiment(r.answer)}</span></div>`).join("")||empty("Answers you save will be listed here."))}`;}
+function history(){return `<div class="section-intro"><p class="subtitle">Search previous sessions and review all submitted answers.</p><button class="btn secondary" data-action="export-responses">Export responses CSV</button></div>${panel("Interview history",`<div class="filter-row"><input id="history-search" placeholder="Search interview, respondent, or project…"><select id="history-status"><option value="all">All statuses</option><option>scheduled</option><option>in-progress</option><option>completed</option></select></div><div id="history-results">${historyRows(state.sessions)}</div>`)}`;}
+function historyRows(rows){return rows.length?`<div class="table-wrap"><table class="table"><thead><tr><th>Interview</th><th>Respondent</th><th>Project / survey</th><th>Date</th><th>Mode</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(s.title)}</td><td>${esc(s.respondentName)}</td><td>${esc(s.surveyTitle)}</td><td>${esc(s.date)}</td><td>${esc(s.mode)}</td><td><span class="status ${s.status}">${s.status}</span></td><td><button class="btn primary small-btn" data-action="open-session" data-id="${s.id}">Review</button></td></tr>`).join("")}</tbody></table></div>`:empty("No interviews match this filter.");}
+function analytics(){const selected=filters.survey==="all"?state.responses:state.responses.filter(r=>r.surveyId===filters.survey);const sentimentCounts=["Positive","Neutral","Negative"].map(x=>[x,selected.filter(r=>sentiment(r.answer)===x).length]);return `<p class="subtitle">Filter and compare survey results, response patterns, and recurring issues.</p>${panel("Analytics filters",`<div class="filter-row"><label>Survey<select id="analytics-survey"><option value="all">All surveys</option>${state.surveys.map(s=>`<option value="${s.id}" ${filters.survey===s.id?"selected":""}>${esc(s.title)}</option>`).join("")}</select></label><label>From<input type="date" id="date-from" value="${filters.from}"></label><label>To<input type="date" id="date-to" value="${filters.to}"></label><button class="btn primary" data-action="apply-filters">Apply filters</button><button class="btn secondary" data-action="export-report">Export report</button></div>`)}<div class="stats-grid">${stat("Responses",selected.length,"Matching answers")}${stat("Sessions",new Set(selected.map(r=>r.sessionId)).size,"Sessions with answers")}${stat("Positive",sentimentCounts[0][1],"Keyword-based estimate")}${stat("Negative",sentimentCounts[2][1],"Keyword-based estimate")}</div><div class="two-col">${panel("Sentiment overview",sentimentCounts.map(([name,n])=>`<div class="bar-row"><span>${name}</span><div class="mini-bar"><i style="width:${selected.length?n/selected.length*100:0}%"></i></div><b>${n}</b></div>`).join(""))}${panel("Recurring keywords",keywords().map(([w,n])=>`<span class="keyword-chip">${esc(w)} <b>${n}</b></span>`).join("")||empty("Keywords appear after text responses are submitted."))}</div>${panel("Response detail",selected.map(r=>`<div class="list-row"><div><b>${esc(r.respondentName)} · ${esc(r.surveyTitle)}</b><small>${esc(r.questionText)}</small><p>${esc(r.answer||("Likert score: "+r.likert)||"Media response")}</p></div><span class="status">${sentiment(r.answer)}</span></div>`).join("")||empty("No responses in this selection."))}`;}
+function render(){const el=$("#app");if(!el)return;let content=page==="dashboard"?dashboard():page==="surveys"?surveys():page==="respondents"?respondents():page==="questions"?questionBank():page==="interviews"?(activeSession?sessionView(activeSession):interviews()):page==="responses"?history():analytics();el.innerHTML=shell(content);bind();}
+function navigate(p){page=p;activeSession=null;render();window.scrollTo(0,0);}
+function modal(title,body){$("#modal-root").innerHTML=`<div class="modal-backdrop" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" data-action="close-modal" aria-label="Close">×</button></div>${body}</div></div>`;}
+function newSurvey(){modal("Create survey",`<form id="survey-form" class="form-grid"><label>Survey title<input name="title" required placeholder="e.g. Student Information System Feedback"></label><label>System / project name<input name="system" required placeholder="Name of the system"></label><label class="full-width">Description<textarea name="description" rows="2" placeholder="What do you want to learn?"></textarea></label><label>Interview type<select name="type"><option>Structured</option><option>Semi-structured</option><option>Unstructured</option></select></label><label>Language<select name="language"><option>English</option><option>Tagalog</option><option>Hiligaynon</option><option>Cebuano</option></select></label><label>Respondent role<input name="role" placeholder="e.g. student, staff, administrator"></label><label>Initial question count<input type="number" name="count" min="3" max="50" value="8"></label><div class="full-width"><button class="btn primary" type="submit">Create and generate questions</button></div></form>`);}
+function editSurvey(id){const s=state.surveys.find(x=>x.id===id);if(!s)return;modal("Manage survey questions",`<p class="muted">Up to 50 questions per survey · ${state.questions.filter(q=>q.surveyId===id).length}/50</p><form id="generate-form" data-id="${id}" class="form-grid"><label class="full-width">System / project<input name="system" value="${esc(s.system)}" required></label><label>Respondent role<input name="role" value="${esc(s.role||"user")}"></label><label>Number to generate<input type="number" name="count" min="1" max="${Math.max(1,50-state.questions.filter(q=>q.surveyId===id).length)}" value="5"></label><div class="full-width"><button class="btn primary" type="submit">Generate AI questions</button></div></form><div class="question-modal-list">${state.questions.filter(q=>q.surveyId===id).map((q,i)=>`<div class="question-row"><div><b>${i+1}. ${esc(q.text)}</b><div class="tag-row"><span class="tag">${esc(q.category)}</span><span class="tag">${esc(q.difficulty)}</span><span class="tag">Relevance ${q.relevance}/5</span></div></div><button class="btn ghost small-btn" data-action="delete-question" data-id="${q.id}">×</button></div>`).join("")||empty("No questions yet.")}</div><form id="manual-question-form" data-id="${id}" class="form-grid"><label class="full-width">Add a question<input name="text" required placeholder="Write an interview question"></label><label>Category<select name="category"><option>Workflow</option><option>Pain Points</option><option>User Expectations</option><option>System Limitations</option><option>Desired Features</option><option>General</option></select></label><label>Difficulty<select name="difficulty"><option>Easy</option><option selected>Medium</option><option>Hard</option></select></label><div class="full-width"><button class="btn secondary" type="submit">＋ Add question</button></div></form>`);}
+function bind(){ $$(".nav-item").forEach(b=>b.onclick=()=>navigate(b.dataset.page)); $$("[data-page]").forEach(b=>{if(!b.classList.contains("nav-item"))b.onclick=()=>navigate(b.dataset.page)}); $$("[data-action]").forEach(b=>b.onclick=()=>action(b.dataset.action,b.dataset.id,b.dataset.session)); const sf=$("#session-form");if(sf)sf.onsubmit=createSession;const surveyForm=$("#survey-form");if(surveyForm)surveyForm.onsubmit=createSurvey;const gf=$("#generate-form");if(gf)gf.onsubmit=generateForSurvey;const mf=$("#manual-question-form");if(mf)mf.onsubmit=addManualQuestion;const qs=$("#q-search"),cat=$("#q-category");if(qs) [qs,cat].forEach(e=>e.oninput=()=>{const rows=state.questions.filter(q=>!q.surveyId&&(!qs.value||q.text.toLowerCase().includes(qs.value.toLowerCase())||(q.tags||[]).join(" ").includes(qs.value.toLowerCase()))&&(cat.value==="all"||q.category===cat.value));$("#bank-results").innerHTML=bankRows(rows);bind();});const hs=$("#history-search"),st=$("#history-status");if(hs)[hs,st].forEach(e=>e.oninput=()=>{$("#history-results").innerHTML=historyRows(state.sessions.filter(s=>(!hs.value||(s.title+" "+s.respondentName+" "+s.surveyTitle).toLowerCase().includes(hs.value.toLowerCase()))&&(st.value==="all"||s.status===st.value)));bind();});}
+function action(a,id,sessionId){if(a==="new-survey")return newSurvey();if(a==="close-modal")return $("#modal-root").innerHTML="";if(a==="new-respondent")return modal("Add respondent",`<form id="respondent-form" class="form-grid"><label>Name<input name="name" required></label><label>Role<input name="role" required></label><label>Department / group<input name="department"></label><label>Email<input name="email" type="email"></label><label>Language<select name="language"><option>English</option><option>Tagalog</option><option>Hiligaynon</option><option>Cebuano</option></select></label><div class="full-width"><button class="btn primary">Save respondent</button></div></form>`);if(a==="edit-survey")return editSurvey(id);if(a==="toggle-survey"){const s=state.surveys.find(x=>x.id===id);if(s){s.status=s.status==="active"?"archived":"active";log("Survey updated",s.title);save();}return;}if(a==="start-survey"){page="interviews";render();const sel=$('[name="surveyId"]');if(sel)sel.value=id;return;}if(a==="delete-respondent"){if(confirm("Delete this respondent? Their saved answers will remain in history.")){state.respondents=state.respondents.filter(r=>r.id!==id);save();}return;}if(a==="delete-question"){state.questions=state.questions.filter(q=>q.id!==id);save();if($("#modal-root").innerHTML)editSurvey(state.questions.find(q=>q.surveyId)?.surveyId||"");return;}if(a==="new-bank-question")return modal("Add question to bank",`<form id="bank-question-form" class="form-grid"><label class="full-width">Question text<input name="text" required></label><label>Category<select name="category"><option>Workflow</option><option>Pain Points</option><option>User Expectations</option><option>System Limitations</option><option>Desired Features</option><option>General</option></select></label><label>Difficulty<select name="difficulty"><option>Easy</option><option>Medium</option><option>Hard</option></select></label><label>Tags<input name="tags" placeholder="workflow, reporting"></label><div class="full-width"><button class="btn primary">Save question</button></div></form>`);if(a==="open-session"){activeSession=state.sessions.find(s=>s.id===id);page="interviews";render();return;}if(a==="save-session"||a==="complete-session"){saveAnswers(id,a==="complete-session");return;}if(a==="apply-filters"){filters={survey:$("#analytics-survey").value,from:$("#date-from").value,to:$("#date-to").value};render();return;}if(a==="export-responses")return exportCSV();if(a==="export-report")return exportReport();if(a==="record")return startRecording(id,sessionId);}
+function createSurvey(e){e.preventDefault();const f=new FormData(e.target),id=uid(),system=f.get("system"),type=f.get("type"),language=f.get("language");const s={id,title:f.get("title").trim(),system,description:f.get("description"),type,language,status:"active",role:f.get("role")||"user",createdAt:new Date().toISOString()};state.surveys.unshift(s);const generated=genQuestions(system,s.role,type,language,f.get("count"));generated.forEach(q=>q.surveyId=id);state.questions.push(...generated);log("Survey created",s.title+" · "+generated.length+" questions");$("#modal-root").innerHTML="";save();page="surveys";render();}
+function generateForSurvey(e){e.preventDefault();const id=e.target.dataset.id,f=new FormData(e.target),s=state.surveys.find(x=>x.id===id);const existing=state.questions.filter(q=>q.surveyId===id).length;if(existing>=50)return alert("This survey already has 50 questions.");const qs=genQuestions(f.get("system"),f.get("role"),s.type,s.language,Math.min(Number(f.get("count")),50-existing));qs.forEach(q=>q.surveyId=id);state.questions.push(...qs);log("AI questions generated",qs.length+" for "+s.title);save();editSurvey(id);}
+function addManualQuestion(e){e.preventDefault();const id=e.target.dataset.id;if(state.questions.filter(q=>q.surveyId===id).length>=50)return alert("Maximum 50 questions per survey.");const f=new FormData(e.target);state.questions.push({id:uid(),surveyId:id,text:f.get("text").trim(),category:f.get("category"),difficulty:f.get("difficulty"),relevance:4,type:"open",tags:[]});log("Question added",f.get("text"));save();editSurvey(id);}
+function createSession(e){e.preventDefault();const f=new FormData(e.target),s=state.surveys.find(x=>x.id===f.get("surveyId"));if(!s)return alert("Create a survey first.");let r=state.respondents.find(x=>x.id===f.get("respondentId"));if(!r&&f.get("newName").trim()){r={id:uid(),name:f.get("newName").trim(),role:f.get("newRole")||"Respondent",language:f.get("language")};state.respondents.push(r);}if(!r&&f.get("mode")!=="Group")return alert("Select a respondent or enter a new respondent name.");const sess={id:uid(),title:f.get("title").trim(),surveyId:s.id,surveyTitle:s.title,system:s.system,mode:f.get("mode"),respondentId:r?.id||"",respondentName:r?.name||(f.get("mode")==="Group"?"Group session":"Random selection"),language:f.get("language"),method:f.get("method"),date:today(),status:"in-progress",createdAt:new Date().toISOString()};if(sess.mode==="Random"&&state.respondents.length){r=state.respondents[Math.floor(Math.random()*state.respondents.length)];sess.respondentId=r.id;sess.respondentName=r.name;}state.sessions.unshift(sess);log("Interview created",sess.title);activeSession=sess;page="interviews";save();}
+function saveAnswers(id,complete){const s=state.sessions.find(x=>x.id===id);if(!s)return;state.questions.filter(q=>q.surveyId===s.surveyId).forEach(q=>{const area=$(`[data-answer="${q.id}"]`),method=$(`[data-method="${q.id}"]`),likert=$(`input[name="likert-${q.id}"]:checked`);if(!area&&!likert)return;let r=state.responses.find(x=>x.sessionId===s.id&&x.questionId===q.id);if(!r){r={id:uid(),sessionId:s.id,surveyId:s.surveyId,respondentId:s.respondentId,respondentName:s.respondentName,questionId:q.id,questionText:q.text,date:today()};state.responses.push(r);}if(area){r.answer=area.value.trim();r.method=method?.value||s.method;r.sentiment=sentiment(r.answer);}if(likert){r.likert=Number(likert.value);r.answer="";}});if(complete)s.status="completed";log(complete?"Interview completed":"Interview answers saved",s.title);save();activeSession=s;render();}
+function exportCSV(){const rows=[["Survey","Interview","Respondent","Question","Answer","Likert","Method","Date","Sentiment"],...state.responses.map(r=>[r.surveyTitle,state.sessions.find(s=>s.id===r.sessionId)?.title,r.respondentName,r.questionText,r.answer,r.likert,r.method,r.date,sentiment(r.answer)])];download("fieldwork-responses.csv",rows.map(row=>row.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\r\n"),"text/csv;charset=utf-8");}
+function exportReport(){const rows=[["Fieldwork Analytics Report"],["Generated",new Date().toLocaleString()],["Survey filter",filters.survey],["Total sessions",state.sessions.length],["Total responses",state.responses.length],[],["Respondent","Survey","Question","Answer","Sentiment"],...state.responses.map(r=>[r.respondentName,r.surveyTitle,r.questionText,r.answer,sentiment(r.answer)])];download("fieldwork-report.csv",rows.map(row=>row.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\r\n"),"text/csv;charset=utf-8");}
+function download(name,content,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href);}
+async function startRecording(qid,sid){const s=state.sessions.find(x=>x.id===sid);const method=$(`[data-method="${qid}"]`)?.value||s?.method||"Voice";if(!confirm("Before recording, confirm the respondent has given consent to record this interview."))return;if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return alert("Recording is not supported in this browser. Use text responses instead.");try{const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:method==="Video"});chunks=[];recorder=new MediaRecorder(stream);recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onstop=()=>{const blob=new Blob(chunks,{type:recorder.mimeType||"video/webm"});const url=URL.createObjectURL(blob);let r=state.responses.find(x=>x.sessionId===sid&&x.questionId===qid);if(!r){const q=state.questions.find(x=>x.id===qid);r={id:uid(),sessionId:sid,surveyId:s.surveyId,respondentId:s.respondentId,respondentName:s.respondentName,questionId:qid,questionText:q.text,date:today(),answer:"",method};state.responses.push(r);}r.mediaUrl=url;r.method=method;save();stream.getTracks().forEach(t=>t.stop());alert("Recording captured for this browser session. Save or export your data before closing the tab.");};recorder.start();modal("Recording in progress",`<p>Recording ${esc(method.toLowerCase())}. Stop when the respondent has finished.</p><div class="action-row"><button class="btn danger" id="stop-recording">Stop recording</button></div>`);$("#stop-recording").onclick=()=>{if(recorder&&recorder.state!=="inactive")recorder.stop();$("#modal-root").innerHTML="";};}catch(e){alert("Unable to access the microphone or camera. Check browser permissions and try again.");}}
+document.addEventListener("submit",e=>{if(e.target.id==="respondent-form"){e.preventDefault();const f=new FormData(e.target);state.respondents.push({id:uid(),name:f.get("name").trim(),role:f.get("role").trim(),department:f.get("department"),email:f.get("email"),language:f.get("language")});log("Respondent added",f.get("name"));$("#modal-root").innerHTML="";save();}if(e.target.id==="bank-question-form"){e.preventDefault();const f=new FormData(e.target);state.questions.push({id:uid(),text:f.get("text").trim(),category:f.get("category"),difficulty:f.get("difficulty"),relevance:3,tags:f.get("tags").split(",").map(x=>x.trim()).filter(Boolean)});log("Question bank updated",f.get("text"));$("#modal-root").innerHTML="";save();}});
+window.addEventListener("online",()=>{sync();syncBadge();});window.addEventListener("offline",syncBadge);
+document.addEventListener("DOMContentLoaded",async()=>{const root=$("#app");if(root){root.innerHTML='<div class="loading">Loading Fieldwork…</div>';await load();}else{document.body.innerHTML='<div id="app"></div>';await load();}});
