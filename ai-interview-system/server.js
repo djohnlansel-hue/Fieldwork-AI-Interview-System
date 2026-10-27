@@ -24,7 +24,15 @@ const EMPTY_STATE = {
   activity: []
 };
 
-app.use(express.json({ limit: "10mb" }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(self), microphone=(self)");
+  next();
+});
+
+app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 async function readSupabaseState() {
@@ -50,7 +58,13 @@ async function readSupabaseState() {
 }
 
 
+const generationAttempts = new Map();
 app.post("/api/generate-questions", async (req, res) => {
+  const now = Date.now();
+  const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+  const recent = (generationAttempts.get(clientKey) || []).filter(time => now - time < 60_000);
+  if (recent.length >= 10) return res.status(429).json({ error: "Too many AI generation requests. Please wait a minute and try again." });
+  recent.push(now); generationAttempts.set(clientKey, recent);
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return res.status(503).json({
