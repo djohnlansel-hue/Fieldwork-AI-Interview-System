@@ -14,21 +14,49 @@ npm start
 
 Open http://localhost:10000.
 
-## Connect Supabase PostgreSQL
+## Connect Supabase using the Supabase client
 
-Fieldwork can use the PostgreSQL database included with Supabase. It uses the existing `/api/state` interface and stores the app's versioned state as JSONB in a `fieldwork_app_state` table.
+Fieldwork uses the Supabase JavaScript client. It does not require a direct PostgreSQL connection string or the `pg` package. Supabase's hosted database itself is PostgreSQL, but the app communicates through the Supabase API.
 
-1. Create or open your project at https://supabase.com/dashboard.
-2. In Supabase, open **Project Settings → Database** and find the database connection string. Use the URI/connection string for the PostgreSQL database (not the anon/public API key). If using a connection pooler, choose the session pooler if the direct connection is not available to your host.
-3. In the Render dashboard, open the Fieldwork web service → **Environment** and add `SUPABASE_DB_URL` with the Supabase PostgreSQL connection string. Keep it secret; do not put it in source code or commit it to GitHub. If the URI has placeholders, replace them with your actual database password and URL-encode special characters in the password.
-4. Save changes and redeploy the Render web service.
-5. Open `/healthz` on your deployed app. Success should return `{"ok":true,"storage":"supabase"}`. The server creates `fieldwork_app_state` and an initial empty state row automatically.
+### 1. Create the table in Supabase
 
-The app prioritizes `SUPABASE_DB_URL` when it is set. `DATABASE_URL` remains supported for other PostgreSQL providers. Without either variable, local development falls back to the JSON file. Set `PGSSLMODE=disable` only for a local PostgreSQL server that does not support TLS.
+Open https://supabase.com/dashboard, select your project, and go to **SQL Editor → New query**. Run this SQL:
+
+```sql
+create table if not exists public.fieldwork_app_state (
+  id smallint primary key check (id = 1),
+  version integer not null default 2,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.fieldwork_app_state enable row level security;
+```
+
+The server inserts the initial state row automatically when needed. The server uses the service-role key and keeps it on the server; do not expose it in browser code.
+
+### 2. Configure Render
+
+In the Render Dashboard, open the Fieldwork web service → **Environment** and add these variables:
+
+- `SUPABASE_URL` — your Supabase project URL (Project Settings → API).
+- `SUPABASE_SERVICE_ROLE_KEY` — the service-role/secret key from your Supabase project's API settings. Keep this secret and server-only. Never put it in frontend code or commit it to GitHub.
+
+Remove the old `SUPABASE_DB_URL` and `DATABASE_URL` variables if they were added for the direct PostgreSQL connection. Save and redeploy the service.
+
+### 3. Verify
+
+Open `/healthz` on the deployed app. Success should return:
+
+```json
+{"ok":true,"storage":"supabase"}
+```
+
+If it returns an error, check that both environment variables are correct and that the SQL table was created.
 
 ### Data migration and safety
 
-Connecting a new Supabase project does not automatically import old data from `fieldwork-data.json` or browser localStorage. Back up and migrate any existing records before switching, otherwise the new database will start with an empty state. Keep database credentials private. The current prototype still needs authentication/authorization, backups and restore testing, retention controls, and stronger multi-user conflict handling before it is used for sensitive research data.
+This change does not automatically import old records from `fieldwork-data.json` or browser localStorage. Back up and migrate any records you need before switching. The service-role key bypasses normal Row Level Security checks, so it must remain secret and be used only by the server. This prototype still needs authentication/authorization and stronger multi-user conflict handling before it is used for sensitive research data.
 
 ## Included features
 
