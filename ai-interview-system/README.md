@@ -14,21 +14,21 @@ npm start
 
 Open http://localhost:10000.
 
-## Persistent database (PostgreSQL)
+## Connect Supabase PostgreSQL
 
-Fieldwork supports PostgreSQL for persistent server-side storage while preserving the existing `/api/state` interface and browser backup.
+Fieldwork can use the PostgreSQL database included with Supabase. It uses the existing `/api/state` interface and stores the app's versioned state as JSONB in a `fieldwork_app_state` table.
 
-1. Create a PostgreSQL database with your hosting provider (for example, a Render PostgreSQL database).
-2. In the Fieldwork **web service** settings, add an environment variable named `DATABASE_URL` with the database's **internal connection string** when the database and web service are in the same Render region.
-3. Redeploy the web service. On startup, Fieldwork creates the `fieldwork_app_state` table and initializes an empty state row if one does not exist.
-4. Check `/healthz`; when PostgreSQL is connected, the response includes `"storage":"postgresql"`.
-5. Check the service logs for `Fieldwork PostgreSQL storage is ready.`
+1. Create or open your project at https://supabase.com/dashboard.
+2. In Supabase, open **Project Settings → Database** and find the database connection string. Use the URI/connection string for the PostgreSQL database (not the anon/public API key). If using a connection pooler, choose the session pooler if the direct connection is not available to your host.
+3. In the Render dashboard, open the Fieldwork web service → **Environment** and add `SUPABASE_DB_URL` with the Supabase PostgreSQL connection string. Keep it secret; do not put it in source code or commit it to GitHub. If the URI has placeholders, replace them with your actual database password and URL-encode special characters in the password.
+4. Save changes and redeploy the Render web service.
+5. Open `/healthz` on your deployed app. Success should return `{"ok":true,"storage":"supabase"}`. The server creates `fieldwork_app_state` and an initial empty state row automatically.
 
-Keep `DATABASE_URL` private. Never commit database credentials to GitHub. For local development, omit `DATABASE_URL` to use the JSON-file fallback; set `PGSSLMODE=disable` only when your local database does not support TLS.
+The app prioritizes `SUPABASE_DB_URL` when it is set. `DATABASE_URL` remains supported for other PostgreSQL providers. Without either variable, local development falls back to the JSON file. Set `PGSSLMODE=disable` only for a local PostgreSQL server that does not support TLS.
 
-### Data and migration notes
+### Data migration and safety
 
-The PostgreSQL table stores the app's existing versioned state as JSONB, so surveys, respondents, sessions, questions, responses, and activity continue using the same application API. This upgrade does not intentionally delete existing data. It does not automatically import an existing `fieldwork-data.json` file into PostgreSQL; back up and import that data before switching an existing deployment if it contains records you need. The browser's localStorage backup remains a separate client-side copy and is not a substitute for database backups.
+Connecting a new Supabase project does not automatically import old data from `fieldwork-data.json` or browser localStorage. Back up and migrate any existing records before switching, otherwise the new database will start with an empty state. Keep database credentials private. The current prototype still needs authentication/authorization, backups and restore testing, retention controls, and stronger multi-user conflict handling before it is used for sensitive research data.
 
 ## Included features
 
@@ -43,4 +43,4 @@ The PostgreSQL table stores the app's existing versioned state as JSONB, so surv
 
 ## Important limitations
 
-The database upgrade provides persistent server-side storage, not a complete production security system. The prototype still needs authentication/authorization, role-based access, backups/restore testing, data retention controls, and stronger multi-user conflict handling before storing sensitive research data. Browser recording currently creates a browser-session media URL; durable media storage and speech-to-text are not implemented. Question generation and sentiment estimates are local heuristics, not a connected LLM service.
+Question generation and sentiment estimates are local heuristics, not a connected LLM service. Browser recording currently creates a browser-session media URL; durable media storage and speech-to-text are not implemented.

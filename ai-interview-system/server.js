@@ -6,11 +6,14 @@ const { Pool } = require("pg");
 const app = express();
 const PORT = process.env.PORT || 10000;
 const DATA_FILE = path.join(__dirname, "fieldwork-data.json");
-const DATABASE_URL = process.env.DATABASE_URL;
+// Use Supabase's PostgreSQL connection string when supplied; DATABASE_URL remains supported.
+const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL;
+const DATABASE_URL = SUPABASE_DB_URL || process.env.DATABASE_URL;
+const storageProvider = SUPABASE_DB_URL ? "supabase" : DATABASE_URL ? "postgresql" : "json-file";
 const pool = DATABASE_URL
   ? new Pool({
       connectionString: DATABASE_URL,
-      // Render PostgreSQL commonly requires TLS for external connections.
+      // Supabase and hosted PostgreSQL connections normally require TLS.
       ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
       max: 5,
       idleTimeoutMillis: 30000,
@@ -34,15 +37,15 @@ async function initializeDatabase() {
     VALUES (1, 2, '{"surveys":[],"respondents":[],"sessions":[],"questions":[],"responses":[],"activity":[]}'::jsonb)
     ON CONFLICT (id) DO NOTHING
   `);
-  console.log("Fieldwork PostgreSQL storage is ready.");
+  console.log("Fieldwork " + storageProvider + " storage is ready.");
 }
 
 if (pool) {
   databaseReady = initializeDatabase().catch((error) => {
-    console.error("Fieldwork PostgreSQL initialization failed:", error.message);
+    console.error("Fieldwork database initialization failed:", error.message);
     throw error;
   });
-  pool.on("error", (error) => console.error("Unexpected PostgreSQL pool error:", error.message));
+  pool.on("error", (error) => console.error("Unexpected database pool error:", error.message));
 }
 
 app.use(express.json({ limit: "10mb" }));
@@ -53,9 +56,9 @@ app.get("/healthz", async (_req, res) => {
   try {
     await databaseReady;
     await pool.query("SELECT 1");
-    return res.status(200).json({ ok: true, storage: "postgresql" });
+    return res.status(200).json({ ok: true, storage: storageProvider });
   } catch {
-    return res.status(503).json({ ok: false, storage: "postgresql", error: "Database unavailable" });
+    return res.status(503).json({ ok: false, storage: storageProvider, error: "Database unavailable" });
   }
 });
 
@@ -95,7 +98,7 @@ app.put("/api/state", async (req, res) => {
          ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, data = EXCLUDED.data, updated_at = NOW()`,
         [req.body.version, JSON.stringify(req.body.data)]
       );
-      return res.json({ ok: true, storage: "postgresql", savedAt: new Date().toISOString() });
+      return res.json({ ok: true, storage: storageProvider, savedAt: new Date().toISOString() });
     }
 
     const tmp = DATA_FILE + ".tmp";
