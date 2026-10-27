@@ -63,7 +63,7 @@ async function readSupabaseState() {
 const APP_USERNAME = process.env.APP_USERNAME || "";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET || "";
-const authConfigured = Boolean(APP_USERNAME && APP_PASSWORD && APP_SESSION_SECRET.length >= 32);
+const authConfigured = Boolean(APP_USERNAME && APP_PASSWORD);
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const loginAttempts = new Map();
 
@@ -100,7 +100,7 @@ app.get("/api/session", (req, res) => {
 });
 
 app.post("/api/login", (req, res) => {
-  if (!authConfigured) return res.status(503).json({ error: "Login is not configured. Set APP_USERNAME, APP_PASSWORD, and a 32-character APP_SESSION_SECRET in Render." });
+  if (!authConfigured || APP_SESSION_SECRET.length < 32) return res.status(503).json({ error: "Login is not configured securely. Set APP_USERNAME, APP_PASSWORD, and a 32-character APP_SESSION_SECRET in Render." });
   const now = Date.now();
   const key = req.ip || req.socket.remoteAddress || "unknown";
   const recent = (loginAttempts.get(key) || []).filter(time => now - time < 60_000);
