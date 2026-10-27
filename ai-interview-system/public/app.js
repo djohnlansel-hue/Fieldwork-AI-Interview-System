@@ -14,18 +14,50 @@ function showLogin(message=""){
  root.innerHTML=`<main style="min-height:100vh;display:grid;place-items:center;background:#f4f1e8;padding:24px;font-family:Arial,sans-serif"><section style="width:min(420px,100%);background:#fff;border:1px solid #d9e4df;border-radius:18px;padding:32px;box-shadow:0 16px 44px #153e3712"><div style="font-size:13px;letter-spacing:2px;color:#28766b;font-weight:700">FIELDWORK</div><h1 style="color:#174d45;margin:10px 0 6px">Sign in</h1><p style="color:#63736d;margin:0 0 24px">AI-Assisted Interview System</p><form id="login-form"><label style="display:block;font-size:14px;margin:12px 0">Username<input name="username" autocomplete="username" required style="box-sizing:border-box;width:100%;padding:12px;margin-top:6px;border:1px solid #cbd8d2;border-radius:8px"></label><label style="display:block;font-size:14px;margin:12px 0">Password<input name="password" type="password" autocomplete="current-password" required style="box-sizing:border-box;width:100%;padding:12px;margin-top:6px;border:1px solid #cbd8d2;border-radius:8px"></label><p id="login-error" role="alert" style="color:#b42318;font-size:13px">${esc(message)}</p><button type="submit" style="width:100%;border:0;border-radius:8px;padding:13px;background:#176b60;color:white;font-weight:700;cursor:pointer">Sign in</button></form><p style="font-size:12px;color:#6b7772;margin-top:18px">Login is managed by the server. Contact your system administrator if credentials are unavailable.</p></section></main>`;
  const form=$("#login-form");if(form)form.onsubmit=async e=>{e.preventDefault();const data=new FormData(form),error=$("#login-error"),button=form.querySelector("button");button.disabled=true;button.textContent="Signing in…";try{const response=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:data.get("username"),password:data.get("password")})});const result=await response.json();if(!response.ok)throw Error(result.error||"Sign-in failed.");await load();}catch(err){error.textContent=err.message||"Unable to sign in.";button.disabled=false;button.textContent="Sign in";}};
 }
+function showConnectionError(message="Fieldwork could not connect to the server. Your Supabase data has not been replaced.") {
+  const root=$("#app"); if(!root)return;
+  root.innerHTML=`<main style="min-height:100vh;display:grid;place-items:center;background:#f4f1e8;padding:24px;font-family:Arial,sans-serif"><section style="width:min(520px,100%);background:#fff;border:1px solid #d9e4df;border-radius:18px;padding:32px"><div style="font-size:13px;letter-spacing:2px;color:#28766b;font-weight:700">FIELDWORK</div><h1 style="color:#174d45">Connection problem</h1><p style="color:#63736d">${esc(message)}</p><button id="retry-connection" style="border:0;border-radius:8px;padding:12px 18px;background:#176b60;color:white;font-weight:700;cursor:pointer">Retry connection</button></section></main>`;
+  $("#retry-connection")?.addEventListener("click",load);
+}
 async function load(){
-  try { const authResponse=await fetch("/api/session",{cache:"no-store"}); if(authResponse.ok){const auth=await authResponse.json();if(auth.authRequired&&!auth.authenticated){showLogin();return;}} } catch {}
-  try { const r=await fetch("/api/state"); if(r.status===401){showLogin("Your session has expired. Please sign in again.");return;} if(r.ok){const server=await r.json(); if(server && server.version===2) state={...base,...server.data}; else state={...base,...server};} else throw Error("API unavailable"); }
-  catch { try{state={...base,...JSON.parse(localStorage.getItem(STORE_KEY)||"{}")};}catch{state={...base};} }
-  state={...base,...state}; render(); syncBadge();
+  let auth;
+  try {
+    const authResponse=await fetch("/api/session",{cache:"no-store"});
+    if(!authResponse.ok) throw Error("The server session endpoint is unavailable.");
+    auth=await authResponse.json();
+  } catch {
+    if(!navigator.onLine){showConnectionError("You are offline. Reconnect to the server before continuing so saved data remains consistent.");return;}
+    showConnectionError();return;
+  }
+  if(auth.authRequired&&!auth.authenticated){showLogin(auth.authConfigured===false?"Server login is not configured correctly. Ask the administrator to check Render environment variables.":"");return;}
+  try {
+    const r=await fetch("/api/state",{cache:"no-store"});
+    if(r.status===401){showLogin("Your session has expired. Please sign in again.");return;}
+    if(!r.ok) throw Error(r.status===503?"The server could not read Supabase. Check /healthz and the database table.":"The server could not load saved data.");
+    const server=await r.json();
+    if(!server||server.version!==2||!server.data||typeof server.data!=="object") throw Error("The server returned an invalid saved-data format.");
+    state={...base,...server.data};
+    localStorage.setItem(STORE_KEY,JSON.stringify(state));
+    render();syncBadge();
+  } catch(err) { showConnectionError(err.message||undefined); }
 }
 async function sync(){
-  if(!navigator.onLine)return syncBadge();
-  try{ const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({version:2,data:state})}); if(!r.ok)throw Error(); localStorage.setItem(STORE_KEY,JSON.stringify(state)); $("#sync-status").textContent="All changes saved"; }
-  catch { localStorage.setItem(STORE_KEY,JSON.stringify(state)); $("#sync-status").textContent="Saved locally · waiting to sync"; }
+  const el=$("#sync-status");
+  if(!navigator.onLine){if(el)el.textContent="Offline · reconnect before saving";return false;}
+  try {
+    const r=await fetch("/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({version:2,data:state})});
+    if(r.status===401){showLogin("Your session has expired. Please sign in again.");return false;}
+    if(!r.ok){const payload=await r.json().catch(()=>({}));throw Error(payload.error||"The server rejected the save.");}
+    localStorage.setItem(STORE_KEY,JSON.stringify(state));
+    if(el)el.textContent="Saved to server";
+    return true;
+  } catch(err) {
+    if(el)el.textContent="Save failed · not confirmed on server";
+    console.error("Fieldwork server save failed:",err);
+    return false;
+  }
 }
-function syncBadge(){ const el=$("#sync-status"); if(el)el.textContent=navigator.onLine?"Connected · local backup enabled":"Offline · changes saved locally"; }
+function syncBadge(){ const el=$("#sync-status"); if(el)el.textContent=navigator.onLine?"Connected · server storage active":"Offline · reconnect before saving"; }
 function save(){ localStorage.setItem(STORE_KEY,JSON.stringify(state)); render(); sync(); }
 function sentiment(t){const s=(t||"").toLowerCase();const pos=["easy","good","great","helpful","fast","excellent","satisfied","useful","love","improve","better","convenient","madali","maganda","maayos","okay","mabuti"];const neg=["slow","error","problem","difficult","hard","confusing","broken","missing","bad","frustrated","delay","crash","mahirap","mabagal","problema","kulang","nakakalito"];let p=pos.filter(w=>s.includes(w)).length,n=neg.filter(w=>s.includes(w)).length;return n>p?"Negative":p>n?"Positive":"Neutral";}
 function keywords(){const stop=new Set("the and for with that this have from are was were you your our their about what when where how can could would should does did into using user system very they them there then than also just".split(" "));const counts={};state.responses.forEach(r=>(r.answer||"").toLowerCase().match(/[a-zA-ZÀ-ÿ]{4,}/g)?.forEach(w=>{if(!stop.has(w))counts[w]=(counts[w]||0)+1;}));return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,12);}
@@ -181,5 +213,5 @@ function printReport(){const oldTitle=document.title;document.title="Fieldwork-A
 function download(name,content,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href);}
 async function startRecording(qid,sid){const s=state.sessions.find(x=>x.id===sid);const method=$(`[data-method="${qid}"]`)?.value||s?.method||"Voice";if(!confirm("Before recording, confirm the respondent has given consent to record this interview."))return;if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return alert("Recording is not supported in this browser. Use text responses instead.");try{const stream=await navigator.mediaDevices.getUserMedia({audio:true,video:method==="Video"});chunks=[];recorder=new MediaRecorder(stream);recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onstop=()=>{const blob=new Blob(chunks,{type:recorder.mimeType||"video/webm"});const url=URL.createObjectURL(blob);let r=state.responses.find(x=>x.sessionId===sid&&x.questionId===qid);if(!r){const q=state.questions.find(x=>x.id===qid);r={id:uid(),sessionId:sid,surveyId:s.surveyId,respondentId:s.respondentId,respondentName:s.respondentName,questionId:qid,questionText:q.text,date:today(),answer:"",method};state.responses.push(r);}r.mediaUrl=url;r.method=method;save();stream.getTracks().forEach(t=>t.stop());alert("Recording captured for this browser session. Save or export your data before closing the tab.");};recorder.start();modal("Recording in progress",`<p>Recording ${esc(method.toLowerCase())}. Stop when the respondent has finished.</p><div class="action-row"><button class="btn danger" id="stop-recording">Stop recording</button></div>`);$("#stop-recording").onclick=()=>{if(recorder&&recorder.state!=="inactive")recorder.stop();$("#modal-root").innerHTML="";};}catch(e){alert("Unable to access the microphone or camera. Check browser permissions and try again.");}}
 document.addEventListener("submit",e=>{if(e.target.id==="respondent-form"){e.preventDefault();const f=new FormData(e.target);state.respondents.push({id:uid(),name:f.get("name").trim(),role:f.get("role").trim(),department:f.get("department"),email:f.get("email"),language:f.get("language")});log("Respondent added",f.get("name"));$("#modal-root").innerHTML="";save();}if(e.target.id==="bank-question-form"){e.preventDefault();const f=new FormData(e.target);state.questions.push({id:uid(),text:f.get("text").trim(),category:f.get("category"),difficulty:f.get("difficulty"),relevance:3,tags:f.get("tags").split(",").map(x=>x.trim()).filter(Boolean)});log("Question bank updated",f.get("text"));$("#modal-root").innerHTML="";save();}});
-window.addEventListener("online",()=>{sync();syncBadge();});window.addEventListener("offline",syncBadge);
+window.addEventListener("online",()=>{load();});window.addEventListener("offline",()=>{syncBadge();});
 document.addEventListener("DOMContentLoaded",async()=>{const root=$("#app");if(root){root.innerHTML='<div class="loading">Loading Fieldwork…</div>';await load();}else{document.body.innerHTML='<div id="app"></div>';await load();}});

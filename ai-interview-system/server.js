@@ -63,7 +63,8 @@ async function readSupabaseState() {
 const APP_USERNAME = process.env.APP_USERNAME || "";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET || "";
-const authConfigured = Boolean(APP_USERNAME && APP_PASSWORD);
+const authRequested = Boolean(APP_USERNAME || APP_PASSWORD || APP_SESSION_SECRET);
+const authConfigured = Boolean(APP_USERNAME && APP_PASSWORD && APP_SESSION_SECRET.length >= 32);
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const loginAttempts = new Map();
 
@@ -78,7 +79,8 @@ function signSession(payload) {
   return encoded + "." + signature;
 }
 function readSession(req) {
-  if (!authConfigured) return { authenticated: true, username: "configured-by-deployment" };
+  if (!authRequested) return { authenticated: true, username: "configured-by-deployment" };
+  if (!authConfigured) return null;
   const cookies = String(req.headers.cookie || "").split(";").map(x => x.trim());
   const token = cookies.find(x => x.startsWith("fieldwork_session="))?.slice("fieldwork_session=".length);
   if (!token) return null;
@@ -96,11 +98,11 @@ function readSession(req) {
 app.get("/api/session", (req, res) => {
   const session = readSession(req);
   res.setHeader("Cache-Control", "no-store");
-  return res.json({ authRequired: authConfigured, authenticated: Boolean(session), username: session?.username || null });
+  return res.json({ authRequired: authRequested, authConfigured, authenticated: Boolean(session), username: session?.username || null });
 });
 
 app.post("/api/login", (req, res) => {
-  if (!authConfigured || APP_SESSION_SECRET.length < 32) return res.status(503).json({ error: "Login is not configured securely. Set APP_USERNAME, APP_PASSWORD, and a 32-character APP_SESSION_SECRET in Render." });
+  if (!authConfigured) return res.status(503).json({ error: "Login is not configured securely. Set APP_USERNAME, APP_PASSWORD, and a 32-character APP_SESSION_SECRET in Render." });
   const now = Date.now();
   const key = req.ip || req.socket.remoteAddress || "unknown";
   const recent = (loginAttempts.get(key) || []).filter(time => now - time < 60_000);
@@ -123,7 +125,8 @@ app.post("/api/logout", (_req, res) => {
 });
 
 app.use("/api", (req, res, next) => {
-  if (!authConfigured || req.path === "/session" || req.path === "/login" || req.path === "/logout") return next();
+  if (req.path === "/session" || req.path === "/login" || req.path === "/logout") return next();
+  if (authRequested && !authConfigured) return res.status(503).json({ error: "Server login is enabled but misconfigured. Set APP_USERNAME, APP_PASSWORD, and APP_SESSION_SECRET (at least 32 characters)." });
   if (!readSession(req)) return res.status(401).json({ error: "Please log in to access Fieldwork." });
   next();
 });
@@ -213,7 +216,8 @@ app.get("/healthz", async (_req, res) => {
       ok: true,
       storage: "json-file",
       supabaseConfigured: false,
-      authConfigured
+      authConfigured,
+      authRequested
     });
   }
 
@@ -225,12 +229,15 @@ app.get("/healthz", async (_req, res) => {
       .maybeSingle();
 
     if (error) throw error;
-    return res.json({ ok: true, storage: "supabase", authConfigured });
+    return res.json({ ok: true, storage: "supabase", supabaseConfigured: true, authConfigured, authRequested });
   } catch (error) {
     console.error("Supabase health check failed:", error.message);
     return res.status(503).json({
       ok: false,
       storage: "supabase",
+      supabaseConfigured: true,
+      authConfigured,
+      authRequested,
       error: "Supabase connection or table setup failed"
     });
   }
