@@ -16,7 +16,7 @@ function showLogin(message=""){
 }
 async function load(){
   try { const authResponse=await fetch("/api/session",{cache:"no-store"}); if(authResponse.ok){const auth=await authResponse.json();if(auth.authRequired&&!auth.authenticated){showLogin();return;}} } catch {}
-  try { const r=await fetch("/api/state"); if(r.ok){const server=await r.json(); if(server && server.version===2) state={...base,...server.data}; else state={...base,...server};} else throw Error("API unavailable"); }
+  try { const r=await fetch("/api/state"); if(r.status===401){showLogin("Your session has expired. Please sign in again.");return;} if(r.ok){const server=await r.json(); if(server && server.version===2) state={...base,...server.data}; else state={...base,...server};} else throw Error("API unavailable"); }
   catch { try{state={...base,...JSON.parse(localStorage.getItem(STORE_KEY)||"{}")};}catch{state={...base};} }
   state={...base,...state}; render(); syncBadge();
 }
