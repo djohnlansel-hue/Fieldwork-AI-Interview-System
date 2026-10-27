@@ -5,6 +5,35 @@ const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Ma
 const today = () => new Date().toISOString().slice(0,10);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const base = {surveys:[], respondents:[], sessions:[], questions:[], responses:[], activity:[]};
+function createDemoData(){
+ const surveyId="demo-survey-student-system", q1="demo-question-navigation", q2="demo-question-improvements";
+ const r1="demo-respondent-student", r2="demo-respondent-staff";
+ const s1="demo-session-student", s2="demo-session-staff";
+ const now=new Date(), dayOffset=n=>{const d=new Date(now);d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);};
+ return {
+  surveys:[{id:surveyId,title:"Student Information System Feedback",system:"Student Information System",description:"Demo interview guide for gathering feedback about the student information system.",type:"Semi-Structured",language:"English",status:"active",role:"user",createdAt:now.toISOString()}],
+  respondents:[
+   {id:r1,name:"Alex Morgan (Demo)",role:"Student",department:"Students",language:"English"},
+   {id:r2,name:"Taylor Reed (Demo)",role:"Administrative Staff",department:"Administration",language:"English"}
+  ],
+  sessions:[
+   {id:s1,title:"Student Portal Usability Interview (Demo)",surveyId,surveyTitle:"Student Information System Feedback",system:"Student Information System",mode:"Individual",respondentId:r1,respondentName:"Alex Morgan (Demo)",participants:[],language:"English",method:"Text",date:dayOffset(1),status:"completed",createdAt:new Date(now.getTime()-86400000).toISOString()},
+   {id:s2,title:"Records Workflow Interview (Demo)",surveyId,surveyTitle:"Student Information System Feedback",system:"Student Information System",mode:"Individual",respondentId:r2,respondentName:"Taylor Reed (Demo)",participants:[],language:"English",method:"Text",date:dayOffset(0),status:"in-progress",createdAt:now.toISOString()}
+  ],
+  questions:[
+   {id:q1,surveyId,text:"How easy is it to find the information you need in the student portal?",category:"User Expectations",difficulty:"Easy",relevance:5,tags:["usability"],type:"open"},
+   {id:q2,surveyId,text:"What improvement would help you complete your tasks more efficiently?",category:"Desired Features",difficulty:"Medium",relevance:5,tags:["improvements"],type:"open"}
+  ],
+  responses:[
+   {id:"demo-response-1",sessionId:s1,surveyId,respondentId:r1,respondentName:"Alex Morgan (Demo)",questionId:q1,questionText:"How easy is it to find the information you need in the student portal?",answer:"The portal is easy to navigate, and I can quickly check my class schedule and grades.",method:"Text",date:dayOffset(1),sentiment:"Positive"},
+   {id:"demo-response-2",sessionId:s1,surveyId,respondentId:r1,respondentName:"Alex Morgan (Demo)",questionId:q2,questionText:"What improvement would help you complete your tasks more efficiently?",answer:"A clearer notification area would help me notice announcements and deadlines.",method:"Text",date:dayOffset(1),sentiment:"Positive"}
+  ],
+  activity:[
+   {id:"demo-activity-1",action:"Demo interview completed",detail:"Student Portal Usability Interview (Demo)",date:new Date(now.getTime()-86400000).toISOString()},
+   {id:"demo-activity-2",action:"Demo interview created",detail:"Records Workflow Interview (Demo)",date:now.toISOString()}
+  ]
+ };
+}
 let state = {...base}, page = "dashboard", activeSession = null, filters = {survey:"all",type:"all",group:"all",from:"",to:""};
 let online = navigator.onLine, recording = null, recorder = null, chunks = [];
 let hasPendingLocalChanges = false;
@@ -39,8 +68,11 @@ async function load(){
     const server=await r.json();
     if(!server||server.version!==2||!server.data||typeof server.data!=="object") throw Error("The server returned an invalid saved-data format.");
     state={...base,...server.data};
-    localStorage.setItem(STORE_KEY,JSON.stringify(state));
+    const seededDemoData=state.sessions.length===0&&state.surveys.length===0&&state.respondents.length===0;
+    if(seededDemoData){state=createDemoData();localStorage.setItem(STORE_KEY,JSON.stringify(state));hasPendingLocalChanges=true;}
+    else localStorage.setItem(STORE_KEY,JSON.stringify(state));
     render();syncBadge();
+    if(seededDemoData) await sync();
   } catch(err) { showConnectionError(err.message||undefined); }
 }
 async function sync(){
