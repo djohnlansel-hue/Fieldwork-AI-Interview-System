@@ -84,7 +84,7 @@ app.post("/api/generate-questions", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "You are an information-systems requirements analyst. Create neutral, clear, non-leading interview questions. Return valid JSON only in the shape {\\"questions\\":[{\\"text\\":string,\\"category\\":string,\\"difficulty\\":\\"Easy\\"|\\"Medium\\"|\\"Hard\\",\\"relevance\\":number,\\"tags\\":string[],\\"followUp\\":string}]}. Categories should be relevant to workflow, pain points, system limitations, user expectations, desired features, or general. Do not claim to have interviewed anyone."
+            content: "You are an information-systems requirements analyst. Create neutral, clear, non-leading interview questions. Return valid JSON only in the shape {\"questions\":[{\"text\":string,\"category\":string,\"difficulty\":\"Easy\"|\"Medium\"|\"Hard\",\"relevance\":number,\"tags\":string[],\"followUp\":string}]}. Categories should be relevant to workflow, pain points, system limitations, user expectations, desired features, or general. Do not claim to have interviewed anyone."
           },
           {
             role: "user",
